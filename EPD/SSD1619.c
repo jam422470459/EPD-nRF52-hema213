@@ -205,13 +205,13 @@ static epd_driver_t epd_drv_ssd1619 = {
     .read_temp = SSD1619_Read_Temp,
 };
 
-// SSD1619 400x300 Black/White/Red
+// SSD1619 250x128 Black/White/Red
 const epd_model_t epd_ssd1619_420_bwr = {
     .id = EPD_SSD1619_420_BWR,
     .color = BWR,
     .drv = &epd_drv_ssd1619,
-    .width = 400,
-    .height = 300,
+    .width = 128,
+    .height = 250,
 };
 
 // SSD1619 400x300 Black/White
@@ -219,6 +219,6 @@ const epd_model_t epd_ssd1619_420_bw = {
     .id = EPD_SSD1619_420_BW,
     .color = BW,
     .drv = &epd_drv_ssd1619,
-    .width = 400,
-    .height = 300,
+    .width = 128,
+    .height = 250,
 };
