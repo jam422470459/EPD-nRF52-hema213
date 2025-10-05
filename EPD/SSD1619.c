@@ -57,7 +57,7 @@
 #define CMD_ANALOG_BLOCK_CTRL 0x74  // Set Analog Block Control
 #define CMD_DIGITAL_BLOCK_CTRL 0x7E // Set Digital Block Control
 #define CMD_NOP 0x7F                // NOP
-
+#define EPD_TOP 8
 static void SSD1619_WaitBusy(uint16_t timeout)
 {
     EPD_WaitBusy(HIGH, timeout);
@@ -113,7 +113,7 @@ void SSD1619_Init()
     EPD_Write(CMD_BORDER_CTRL, 0x01);
     EPD_Write(CMD_TSENSOR_CTRL, 0x80);
 
-    _setPartialRamArea(0, 0, EPD->width, EPD->height);
+    _setPartialRamArea(0+EPD_TOP, 0, EPD->width, EPD->height);
 }
 
 static void SSD1619_Refresh(void)
@@ -130,7 +130,7 @@ static void SSD1619_Refresh(void)
 
 //    SSD1619_Dump_LUT();
 
-    _setPartialRamArea(0, 0, EPD->width, EPD->height); // DO NOT REMOVE!
+    _setPartialRamArea(0+EPD_TOP, 0, EPD->width, EPD->height);
     SSD1619_Update(0x83);                              // power off
 }
 
@@ -139,7 +139,7 @@ void SSD1619_Clear(bool refresh)
     epd_model_t *EPD = epd_get();
     uint32_t ram_bytes = ((EPD->width + 7) / 8) * EPD->height;
 
-    _setPartialRamArea(0, 0, EPD->width, EPD->height);
+     _setPartialRamArea(0+EPD_TOP, 0, EPD->width, EPD->height);
 
     EPD_FillRAM(CMD_WRITE_RAM1, 0xFF, ram_bytes);
     EPD_FillRAM(CMD_WRITE_RAM2, 0xFF, ram_bytes);
@@ -157,7 +157,7 @@ void SSD1619_Write_Image(uint8_t *black, uint8_t *color, uint16_t x, uint16_t y,
     if (x + w > EPD->width || y + h > EPD->height)
         return;
 
-    _setPartialRamArea(x, y, w, h);
+      _setPartialRamArea(x+EPD_TOP, y, w, h);
     EPD_WriteCmd(CMD_WRITE_RAM1);
     for (uint16_t i = 0; i < h; i++)
     {
