@@ -52,13 +52,11 @@ static const Festival festivals_lunar[] = {
 };
 
 // 放假和调休数据，每年更新
-#define HOLIDAY_YEAR 2025
+#define HOLIDAY_YEAR 2026
 static const uint16_t holidays[] = {
-    0x0101, 0x111A, 0x011C, 0x011D, 0x011E, 0x011F, 0x0201, 0x0202,
-    0x0202, 0x0203, 0x0204, 0x1208, 0x0404, 0x0405, 0x0406, 0x141B,
-    0x0501, 0x0502, 0x0503, 0x0504, 0x0505, 0x051F, 0x0601, 0x0602,
-    0x191C, 0x0A01, 0x0A02, 0x0A03, 0x0A04, 0x0A05, 0x0A06, 0x0A07,
-    0x0A08, 0x1A0B,
+    0x0101, 0x0102, 0x0103, 0x1104, 0x120E, 0x020F, 0x0210, 0x0211, 0x0212, 0x0213, 0x0214, 0x0215, 0x0216,
+    0x0217, 0x121C, 0x0404, 0x0405, 0x0406, 0x0501, 0x0502, 0x0503, 0x0504, 0x0505, 0x1509, 0x0613, 0x0614,
+    0x0615, 0x0919, 0x091A, 0x091B, 0x1914, 0x0A01, 0x0A02, 0x0A03, 0x0A04, 0x0A05, 0x0A06, 0x0A07, 0x1A0A,
 };
 
 static bool GetHoliday(uint8_t mon, uint8_t day, bool *work)
@@ -133,26 +131,7 @@ static bool GetFestival(uint16_t year, uint8_t mon, uint8_t day, uint8_t week,
     return false;
 }
 
-static void DisplayInput(Adafruit_GFX *gfx, gui_data_t *data)
-{
-	
-   GFX_setFont(gfx, u8g2_font_wqy12_t_lunar);
-     GFX_setTextColor(gfx, GFX_RED, GFX_WHITE);	
-    GFX_setCursor(gfx, 4, 40);
 
- 
-	GFX_printf(gfx, "DevieName:%s", data->ssid);
-     GFX_setCursor(gfx, 4, 40+20);
-//	GFX_printf(gfx, "send command xxxxxxxx to unlock");	
-		GFX_printf(gfx, "Connect & Send 8 digit");	
-     GFX_setCursor(gfx, 4 + 100, 40+20 + 20);	
-		GFX_printf(gfx, " to unlock");	
-	
-	   GFX_setCursor(gfx, 4, 40 +40+20);
-     GFX_setTextColor(gfx, GFX_RED, GFX_WHITE);	
-	GFX_printf(gfx, "QQ:422470459");	
-	
-}
 static void DrawTimeSyncTip(Adafruit_GFX *gfx, gui_data_t *data)
 {
     const char *title = "SYNC TIME!";
