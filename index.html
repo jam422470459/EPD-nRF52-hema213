@@ -1,0 +1,1418 @@
+<!DOCTYPE html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style>
+  div {
+    padding: 12px;
+    margin: 2 auto;
+  }
+</style>  
+</head>
+
+<body>
+  <script>
+ 
+ const bwrPalette = [
+  [0, 0, 0, 255],
+  [255, 255, 255, 255],
+  [255, 0, 0, 255]
+]
+
+const bwPalette = [
+  [0, 0, 0, 255],
+  [255, 255, 255, 255],
+]
+
+function rotateCanvas(degrees) {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // 创建临时canvas
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d');
+
+  // 设置临时canvas尺寸
+  tempCanvas.width = canvas.width;
+  tempCanvas.height = canvas.height;
+
+  // 复制当前内容
+  tempCtx.drawImage(canvas, 0, 0);
+
+  // 清空原canvas
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 计算旋转后的尺寸
+  if (Math.abs(degrees) === 90) {
+    // 旋转90度需要交换宽高
+    canvas.width = tempCanvas.height;
+    canvas.height = tempCanvas.width;
+  }
+
+  // 旋转绘制
+  ctx.save();
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(degrees * Math.PI / 180);
+  ctx.translate(-tempCanvas.width / 2, -tempCanvas.height / 2);
+  ctx.drawImage(tempCanvas, 0, 0);
+  ctx.restore();
+
+  // 重新应用抖动
+  convert_dithering();
+
+  console.log(`旋转 ${degrees} 度，新尺寸: ${canvas.width}x${canvas.height}`);
+}
+
+function dithering(ctx, width, height, thresholds, type) {
+  const bayerThresholdMap = [
+    [  15, 135,  45, 165 ],
+    [ 195,  75, 225, 105 ],
+    [  60, 180,  30, 150 ],
+    [ 240, 120, 210,  90 ]
+  ];
+
+  const lumR = [];
+  const lumG = [];
+  const lumB = [];
+  for (let i=0; i<256; i++) {
+    lumR[i] = i*0.299;
+    lumG[i] = i*0.587;
+    lumB[i] = i*0.114;
+  }
+  const imageData = ctx.getImageData(0, 0, width, height);
+
+  const imageDataLength = imageData.data.length;
+
+  // Greyscale luminance (sets r pixels to luminance of rgb)
+  for (let i = 0; i <= imageDataLength; i += 4) {
+    imageData.data[i] = Math.floor(lumR[imageData.data[i]] + lumG[imageData.data[i+1]] + lumB[imageData.data[i+2]]);
+  }
+
+  const w = imageData.width;
+  let newPixel, err;
+
+  for (let currentPixel = 0; currentPixel <= imageDataLength; currentPixel+=4) {
+
+    if (type ==="somegray") {
+      imageData.data[currentPixel] = imageData.data[currentPixel] > thresholds[2] ? 255 : (imageData.data[currentPixel] > thresholds[1] ? 170 : (imageData.data[currentPixel] > thresholds[0] ? 85 : 0));
+    } else if (type ==="none") {
+      // No dithering
+      imageData.data[currentPixel] = imageData.data[currentPixel] < thresholds[0] ? 0 : 255;
+    } else if (type ==="bayer") {
+      // 4x4 Bayer ordered dithering algorithm
+      var x = currentPixel/4 % w;
+      var y = Math.floor(currentPixel/4 / w);
+      var map = Math.floor( (imageData.data[currentPixel] + bayerThresholdMap[x%4][y%4]) / 2 );
+      imageData.data[currentPixel] = (map < thresholds[0]) ? 0 : 255;
+    } else if (type ==="floydsteinberg") {
+      // Floyda€"Steinberg dithering algorithm
+      newPixel = imageData.data[currentPixel] < 129 ? 0 : 255;
+      err = Math.floor((imageData.data[currentPixel] - newPixel) / 16);
+      imageData.data[currentPixel] = newPixel;
+
+      imageData.data[currentPixel       + 4 ] += err*7;
+      imageData.data[currentPixel + 4*w - 4 ] += err*3;
+      imageData.data[currentPixel + 4*w     ] += err*5;
+      imageData.data[currentPixel + 4*w + 4 ] += err*1;
+    } else {
+      // Bill Atkinson's dithering algorithm
+      newPixel = imageData.data[currentPixel] < thresholds[0] ? 0 : 255;
+      err = Math.floor((imageData.data[currentPixel] - newPixel) / 8);
+      imageData.data[currentPixel] = newPixel;
+
+      imageData.data[currentPixel       + 4 ] += err;
+      imageData.data[currentPixel       + 8 ] += err;
+      imageData.data[currentPixel + 4*w - 4 ] += err;
+      imageData.data[currentPixel + 4*w     ] += err;
+      imageData.data[currentPixel + 4*w + 4 ] += err;
+      imageData.data[currentPixel + 8*w     ] += err;
+    }
+
+    // Set g and b pixels equal to r
+    imageData.data[currentPixel + 1] = imageData.data[currentPixel + 2] = imageData.data[currentPixel];
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function canvas2bytes(canvas, type='bw', graysec=0) {
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  const arr = [];
+  let buffer = [];
+
+  for (let x = canvas.width - 1; x >= 0; x--) {
+    for (let y = 0; y < canvas.height; y++) {
+      const index = (canvas.width * 4 * y) + x * 4;
+      if (type === 'bwr') {
+        buffer.push(imageData.data[index] > 0 && imageData.data[index+1] === 0 && imageData.data[index+2] === 0 ? 1 : 0);
+      } else if(type === "bw") {
+        buffer.push(imageData.data[index] > 0 && imageData.data[index+1] > 0 && imageData.data[index+2] > 0 ? 1 : 0);
+      } else if(type === "gray") {
+        buffer.push(imageData.data[index]/85 >= graysec ? 1 : 0);
+      }
+
+      if (buffer.length === 8) {
+        arr.push(parseInt(buffer.join(''), 2));
+        buffer = [];
+      }
+    }
+  }
+  return arr;
+}
+
+function canvas2bytes2(canvas, type='bw') {
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  const arr = [];
+  let buffer = [];
+
+  for (let x = canvas.width - 1; x >= 0; x--) {
+    for (let y = 0; y < canvas.height; y++) {
+      const index = (canvas.width * 4 * y) + x * 4;
+      // if (type === 'bwr') {
+      //   buffer.push(imageData.data[index] > 0 && imageData.data[index+1] === 0 && imageData.data[index+2] === 0 ? 1 : 0);
+      // } else if(type === "bw") {
+      //   buffer.push(imageData.data[index] > 0 && imageData.data[index+1] > 0 && imageData.data[index+2] > 0 ? 1 : 0);
+      // } else if(type === "gray") {
+      //   buffer.push(imageData.data[index]/85 >= graysec ? 1 : 0);
+      // }
+
+
+      
+      if (type !== 'red') {
+        buffer.push(imageData.data[index] === 0 && imageData.data[index+1] === 0 && imageData.data[index+2] === 0 ? 0 : 1);
+      }else{
+        buffer.push(imageData.data[index] > 0 && imageData.data[index+1] === 0 && imageData.data[index+2] === 0 ? 0 : 1);
+      }  
+
+
+
+
+      if (buffer.length === 8) {
+        arr.push(parseInt(buffer.join(''), 2));
+        buffer = [];
+      }
+    }
+  }
+  return arr;
+}
+
+
+function getColorDistance(rgba1, rgba2) {
+  const [r1, b1, g1] = rgba1;
+  const [r2, b2, g2] = rgba2;
+
+  const rm = (r1 + r2 ) / 2;
+
+  const r = r1 - r2;
+  const g = g1 - g2;
+  const b = b1 - b2;
+
+  return Math.sqrt((2 + rm / 256) * r * r + 4 * g * g + (2 + (255 - rm) / 256) * b * b);
+}
+
+function getNearColor(pixel, palette) {
+  let minDistance = 255 * 255 * 3 + 1;
+  let paletteIndex = 0;
+
+  for (let i = 0; i < palette.length; i++) {
+    const targetColor = palette[i];
+    const distance = getColorDistance(pixel, targetColor);
+    if (distance < minDistance) {
+      minDistance = distance;
+      paletteIndex = i;
+    }
+  }
+
+  return palette[paletteIndex];
+}
+
+
+function getNearColorV2(color, palette) {
+  let minDistanceSquared = 255*255 + 255*255 + 255*255 + 1;
+
+  let bestIndex = 0;
+  for (let i = 0; i < palette.length; i++) {
+      let rdiff = (color[0] & 0xff) - (palette[i][0] & 0xff);
+      let gdiff = (color[1] & 0xff) - (palette[i][1] & 0xff);
+      let bdiff = (color[2] & 0xff) - (palette[i][2] & 0xff);
+      let distanceSquared = rdiff*rdiff + gdiff*gdiff + bdiff*bdiff;
+      if (distanceSquared < minDistanceSquared) {
+          minDistanceSquared = distanceSquared;
+          bestIndex = i;
+      }
+  }
+  return palette[bestIndex];
+
+}
+
+
+function updatePixel(imageData, index, color) {
+  imageData[index] = color[0];
+  imageData[index+1] = color[1];
+  imageData[index+2] = color[2];
+  imageData[index+3] = color[3];
+}
+
+function getColorErr(color1, color2, rate) {
+  const res = [];
+  for (let i = 0; i < 3; i++) {
+    res.push(Math.floor((color1[i] - color2[i]) / rate));
+  }
+  return res;
+}
+
+function updatePixelErr(imageData, index, err, rate) {
+  imageData[index] += err[0] * rate;
+  imageData[index+1] += err[1] * rate;
+  imageData[index+2] += err[2] * rate;
+}
+
+function ditheringCanvasByPalette(canvas, palette, type) {
+  palette = palette || bwrPalette;
+
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const w = imageData.width;
+
+  for (let currentPixel = 0; currentPixel <= imageData.data.length; currentPixel+=4) {
+    const newColor = getNearColorV2(imageData.data.slice(currentPixel, currentPixel+4), palette);
+
+    if (type === "bwr_floydsteinberg") {
+      const err = getColorErr(imageData.data.slice(currentPixel, currentPixel+4), newColor, 16);
+
+      updatePixel(imageData.data, currentPixel, newColor);
+      updatePixelErr(imageData.data, currentPixel +4, err, 7);
+      updatePixelErr(imageData.data, currentPixel + 4*w - 4, err, 3);
+      updatePixelErr(imageData.data, currentPixel + 4*w, err, 5);
+      updatePixelErr(imageData.data, currentPixel + 4*w + 4, err, 1);
+    } else {
+      const err = getColorErr(imageData.data.slice(currentPixel, currentPixel+4), newColor, 8);
+
+      updatePixel(imageData.data, currentPixel, newColor);
+      updatePixelErr(imageData.data, currentPixel +4, err, 1);
+      updatePixelErr(imageData.data, currentPixel +8, err, 1);
+      updatePixelErr(imageData.data, currentPixel +4 * w - 4, err, 1);
+      updatePixelErr(imageData.data, currentPixel +4 * w, err, 1);
+      updatePixelErr(imageData.data, currentPixel +4 * w + 4, err, 1);
+      updatePixelErr(imageData.data, currentPixel +8 * w, err, 1);
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+ 
+function hexToBytes(hex) {
+  for (var bytes = [], c = 0; c < hex.length; c += 2)
+    bytes.push(parseInt(hex.substr(c, 2), 16));
+  return new Uint8Array(bytes);
+}
+
+function bytesToHex(data) {
+  return new Uint8Array(data).reduce(
+    function (memo, i) {
+      return memo + ("0" + i.toString(16)).slice(-2);
+    }, "");
+}
+
+function intToHex(intIn, bytes=4) {
+    return intIn.toString(16).padStart(bytes * 2, '0');
+}
+
+  </script>
+  <script>
+    let bleDevice;
+    let gattServer;
+    let Theservice;
+    let epdService;
+    let epochCharacter;
+
+    async function sleep(ms) {
+      await new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function doConnect() {
+      if (gattServer != null && gattServer.connected) {
+        if (bleDevice != null && bleDevice.gatt.connected)
+          bleDevice.gatt.disconnect();
+      }
+      else {
+        bleDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: ['C26_'] }],
+          optionalServices: [
+            0xfff0,
+          ],
+          //acceptAllDevices: true 
+        });
+        await bleDevice.addEventListener('gattserverdisconnected', disconnect);
+        await connect();
+      }
+    }
+
+	function etagFnEnable(flag) {
+	    const ts = ['input','button','select']
+	    ts.forEach(t => { 
+	           const eles = document.getElementById('etagFn').querySelectorAll(t); 
+	           eles.forEach(ele => {
+	               if(flag){
+	                ele.removeAttribute("disabled");
+	                }else{
+	                ele.setAttribute('disabled', true); 
+	                }
+	           }); 
+           }); 
+      }
+
+    async function connect() {
+      if (epochCharacter == null) {
+        info("Connect to " + bleDevice.name)
+        gattServer = await bleDevice.gatt.connect();
+        info('> Found GATT server');
+        epdService = await gattServer.getPrimaryService(0xfff0);
+        info('> Found EPD service');
+        epochCharacter = await epdService.getCharacteristic(0xfff1);
+        document.getElementById("btnConnect").innerHTML = 'Disconnect';
+        etagFnEnable(true);//document.getElementById('etagFn').style.visibility = '';
+      }
+    }
+
+    function disconnect() {
+      bleDevice = null;
+      epdService = null;
+      epochCharacter = null;
+      info('Disconnected.');
+
+      document.getElementById("btnConnect").innerHTML = 'Connect';
+      etagFnEnable(false);//document.getElementById('etagFn').style.visibility = 'hidden';
+    }
+
+    async function doSetTime() {
+      var epoch = Date.now() / 1000 | 0;
+      var buf = new ArrayBuffer(4);
+      var arr = new Uint32Array(buf);
+      arr[0] = epoch;
+      await epochCharacter.writeValueWithResponse(arr);
+      info("Write unix epoch: " + epoch);
+    }
+
+    async function doReadEtag() {
+      var host_epoch = Date.now() / 1000 | 0;
+
+      // read current time
+      var chr = await epdService.getCharacteristic(0xfff1);
+      var epoch = (await chr.readValue()).getUint32(0, 1);
+
+      // read time zone
+      var chr = await epdService.getCharacteristic(0xfff2);
+      var tz_min = (await chr.readValue()).getInt32(0, 1);
+      info(`# host time: ${host_epoch}, diff (${epoch - host_epoch}) seconds.`);
+      info(`# etag time: ${epoch}, tz: ${tz_min} minutes of UTC.`);
+
+      // battery
+      var chr = await epdService.getCharacteristic(0xfff3);
+      var batt = (await chr.readValue()).getUint16(0, 1);
+
+      // Temperature
+      var chr = await epdService.getCharacteristic(0xfff4);
+      var temp = (await chr.readValue()).getInt8(0, 1);
+      info(`# etag sensor: battery(${batt}mv), temperature(${temp}℃).`);
+
+      // RTC Collaborate
+      var chr = await epdService.getCharacteristic(0xfff5);
+      var rtc_collab = (await chr.readValue()).getInt8(0, 1);
+      info(`# rtc collab: ${rtc_collab} every 1 second.`);
+    }
+
+    async function doRtcCollab() {
+      var col = prompt("对 32.768kHz 晶振补偿频漂，走时快补偿负数，走时慢补偿正数。可选范围 (-5 ~ 5)", 0);
+      if (col == null || col < -5 || col > 5) return;
+      var chr = await epdService.getCharacteristic(0xfff5);
+      var buf = new ArrayBuffer(1);
+      var arr = new Int8Array(buf);
+      arr[0] = parseInt(col);
+      await chr.writeValueWithResponse(arr);
+      info(`write RTC collabration: ${col}`);
+    }
+
+    async function doTest() {
+      var chr = await epdService.getCharacteristic(0xfffe);
+      var buf = new ArrayBuffer(62);
+      var arr = new Int8Array(buf);
+      for (var i = 0; i < arr.length; i++) {
+        arr[i] = i % 8;
+      }
+      await chr.writeValueWithResponse(arr);
+      info(`> write ${arr.length} bytes.`)
+      //var out = await chr.readValue();
+      //console.log(out);
+    }
+
+    async function doCmd(cmd, data) {
+      const epdCmd = {
+        EPD_CMD_CLR: 1,
+        EPD_CMD_MODE: 2,
+        EPD_CMD_BUF: 3,
+        EPD_CMD_BUF_CONT: 4,
+        EPD_CMD_LUT: 5,
+        EPD_CMD_RST: 6,
+        EPD_CMD_BW: 7,
+        EPD_CMD_RED: 8,
+        EPD_CMD_DP: 9,
+        EPD_CMD_FILL: 10,
+        
+        EPD_CMD_BUF_PUT: 11,
+        EPD_CMD_BUF_GET: 12,
+        EPD_CMD_SNV_WRITE: 13,
+        EPD_CMD_SNV_READ: 14,
+
+        EPD_CMD_SAVE_CFG: 15,
+      };
+
+      var chr = await epdService.getCharacteristic(0xfffe);
+      switch (cmd) {
+        case 'read': {
+          var data = await chr.readValue();
+          return data;
+        }
+ 
+        case 'clr':
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_CLR]));
+          break;
+
+        case 'mode':
+          // await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_MODE, data == 'image'?0x01:0x00]));
+            // 扩展mode指令：时钟=0x00、图片=0x01、日历=0x02
+          let modeVal = 0x00; // 默认时钟模式
+          if(data === 'image'){
+            modeVal = 0x01;
+          }else if(data === 'calendar'){ // 新增日历模式指令值
+            modeVal = 0x02;
+          }
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_MODE, modeVal]));
+          break;
+           case 'buf':
+          for (var i = 0; i < data.length; i += 60) {
+            let arr = [(i == 0 ? epdCmd.EPD_CMD_BUF : epdCmd.EPD_CMD_BUF_CONT)];
+            arr.push(...data.slice(i, i + 60));
+            //console.log(arr);
+            await chr.writeValueWithResponse(Uint8Array.from(arr));
+            //  info(`> buf at ${i} size ${arr.length}`)
+          }
+          break;
+
+        case 'lut':
+          let arr = [epdCmd.EPD_CMD_LUT];
+          arr.push(...data);
+          await chr.writeValueWithResponse(Uint8Array.from(arr));
+          break;
+
+        case 'rst':
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_RST]));
+          break;
+
+        case 'bw':
+          // write to bw ram
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_BW]));
+          break;
+
+        case 'red':
+          // write to bw ram
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_RED]));
+          break;
+
+        case 'fill':
+          // fill ram with black(0) or red(1)
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_FILL, data == 'red' ? 0x01:0x00]));
+          break;
+
+        case 'dp':
+          // show
+          let lut = 0;
+          switch (data) {
+            case 'gray8': 
+              lut = 2;
+              break;
+            case 'user': 
+              lut = 0xff;
+              break;
+            case 'full': 
+            default:
+              lut = 0; 
+          }
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_DP, lut]));
+          break;
+
+        case 'snv_read':
+          // SNV index, read length
+          console.log(`snv read ${data}`);
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_SNV_READ, ...data]));
+          break;
+ 
+        case 'snv_write':
+          // SNV index
+          console.log(`snv write ${data}`);
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_SNV_WRITE, data]));
+          break;
+        
+        case 'buf_get':
+          // buffer index
+          console.log(`buf get ${data}`);
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_BUF_GET, data]));
+          break;
+        
+        case 'buf_put':
+          // buffer index, data ...
+          console.log(`buf put ${data}`);
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_BUF_PUT, ...data]));
+          break;
+        
+        case 'save_cfg':
+          await chr.writeValueWithResponse(Uint8Array.from([epdCmd.EPD_CMD_SAVE_CFG]));
+          break;
+
+     }
+      info (`> epdCmd.${cmd}`)
+    }
+
+    async function doCmdRead(snvId, size) {
+      var out = [];
+      
+      // request SNV read
+      await doCmd('snv_read', [snvId, size]);
+
+      // pull data
+      for (var i=0; i<size; ) {
+        await doCmd('buf_get', i);
+        var data = new Uint8Array((await doCmd('read')).buffer);
+        if (data.byteLength == 0) {
+          break;
+        }
+        // first byte is the data index 
+        i += data.byteLength - 1;
+
+        // add data to out, except the first byte.
+        out.push(...data.slice(1));
+      }
+      return out;
+    }
+
+    let ram_bw = [];
+    let ram_red = [];
+    function doImageGrey(type) {
+      const canvas = document.getElementById('canvas');
+      ram_bw = canvas2grey8(canvas, 'bw');
+      ram_red = canvas2grey8(canvas, 'red');
+    }
+
+    var step = 0;
+    async function doUploadImageGray8() {
+      await doCmd('clr');
+      await sleep(15*1000);
+
+      doImageGrey();
+      for (var i = 0; i < 8; i++) {
+        await doCmd('rst');
+        await sleep(8000);
+        await doUploadImageRam8('bw');
+        await doUploadImageRam8('red');
+        await doCmd('dp', 'gray8');
+        await sleep(8000);
+        step++;
+      }
+      step = 0;
+      info('> Upload done.')
+    }
+    
+    async function doUploadImage(type) {
+      try {
+        console.log('开始上传图片...');
+
+        // 检查连接
+        if (!epdService || !gattServer || !gattServer.connected) {
+          console.warn('设备未连接，尝试重新连接...');
+          info('设备未连接，尝试重新连接...');
+
+          if (!bleDevice) {
+            throw new Error('请先连接设备');
+          }
+
+          // 尝试重新连接
+          await connect();
+
+          if (!epdService) {
+            throw new Error('连接失败，请检查设备');
+          }
+        }
+
+        if (type == 'gray8') {
+          await doUploadImageGray8();
+        } else {
+          console.log('执行清屏和等待...');
+          await doCmd('rst');
+          await sleep(2000);   
+          
+          console.log('上传黑白数据...');
+          await doUploadImageRam2('bw');
+          
+          console.log('上传红色数据...');
+          await doUploadImageRam2('red');
+          
+          console.log('显示图片...');
+          await doCmd('dp', 'full');
+          await sleep(15*1000);
+        }
+
+        console.log('上传完成');
+        info('图片上传完成');
+      } catch (error) {
+        console.error('上传图片失败:', error);
+        info(`上传失败: ${error.message}`);
+      }
+    }
+
+    async function doUploadImageRam2(type = 'bw') {
+      const canvas = document.getElementById('canvas');
+
+        //  var arr = canvas2bytes(canvas, type); 
+// 获取选中的字节转换类型（ssd/uc）
+  const convertType = document.querySelector('input[name="byteConvertType"]:checked').value;
+  // 根据类型调用对应的转换函数
+  var arr = convertType === 'ssd' 
+    ? canvas2bytes(canvas, type)  // 选中ssd时调用canvas2bytes
+    : canvas2bytes2(canvas, type); // 选中uc时调用canvas2bytes2
+  
+ 
+  
+      
+      console.log(`生成数据长度: ${arr.length} 字节`);
+      
+      // 发送命令和数据
+      await doCmd(type);
+      await doCmd('buf', arr);
+      
+      return arr;
+    }
+
+    async function doUploadImageRam8(type = 'bw') {
+      var ram = type == 'bw' ? ram_bw : ram_red;
+
+      // grey byte to bit
+      var arr = [];
+      var buffer = [];
+      for (var x = 0; x < ram.length; x++) {
+        const n = ram[x] > step ? 1 : 0;
+        if (type == 'bw') {
+          buffer.push(n ? 0 : 1);
+        } else {
+          buffer.push(n ? 1 : 0);
+        }
+
+        if (buffer.length == 8) {
+          arr.push(parseInt(buffer.join(''), 2));
+          buffer = [];
+        }
+      }
+
+      info(`> write ram ${type} size ${arr.length}, step ${step}`);
+      console.log(arr);
+      await doCmd('buf', arr);
+      await doCmd(type)
+    }
+
+    function info(logTXT) {
+      var today = new Date();
+      var time = ("0" + today.getHours()).slice(-2) + ":" + ("0" + today.getMinutes()).slice(-2) + ":" + ("0" + today.getSeconds()).slice(-2) + " : ";
+      document.getElementById("log").innerHTML += time + logTXT + '<br>';
+      console.log(time + logTXT);
+      while ((document.getElementById("log").innerHTML.match(/<br>/g) || []).length > 10) {
+        var logs_br_position = document.getElementById("log").innerHTML.search("<br>");
+        document.getElementById("log").innerHTML = document.getElementById("log").innerHTML.substring(logs_br_position + 4);
+      }
+    }
+
+    async function load_image() {
+      const image_file = document.getElementById('image_file');
+      if (image_file.files.length > 0) {
+        const file = image_file.files[0];
+
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const image = new Image();
+        image.src = URL.createObjectURL(file);
+        image.onload = function (event) {
+          URL.revokeObjectURL(this.src);
+          ctx.drawImage(image, 0, 0, image.width, image.height, 0, 0, canvas.width, canvas.height);
+          //convert_dithering()
+        }
+      }
+    }
+
+    function clear_canvas() {
+      if (confirm('确认清除屏幕?')) {
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    function canvas2bytes(canvas, type = 'bw') {
+      const ctx = canvas.getContext("2d");
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      const arr = [];
+      let buffer = [];
+
+      for (let y = 0; y < canvas.height; y += 8) {
+        for (let x = 0; x < canvas.width; x++) {
+          for (let a = 0; a < 8; a++) {
+            const i = (canvas.width * (y + a) + x) * 4;
+            if (type !== 'red') {
+              // 1 for white, 0 for black
+              // black : 0, 0, 0
+              buffer.push(imageData.data[i] === 0 && imageData.data[i + 1] === 0 && imageData.data[i + 2] === 0 ? 0 : 1);
+            } else {
+              // 1 for red, 0 for white
+              buffer.push(imageData.data[i] > 0 && imageData.data[i + 1] === 0 && imageData.data[i + 2] === 0 ? 1 : 0);
+            }
+          }
+          arr.push(parseInt(buffer.join(''), 2));
+          buffer = [];
+        }
+      }
+      console.log(arr);
+      return arr;
+    }
+
+    function canvas2grey8(canvas, type = 'bw') {
+      // each px = 4bit black + 4bit red.
+      const ctx = canvas.getContext("2d");
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      const arr = [];
+      let buffer = [];
+
+      for (let y = 0; y < canvas.height; y += 8) {
+        for (let x = 0; x < canvas.width; x++) {
+          for (let a = 0; a < 8; a++) {
+            const i = (canvas.width * (y + a) + x) * 4;
+            const R = imageData.data[i];
+            const G = imageData.data[i + 1];
+            const B = imageData.data[i + 2];
+
+            let grey = 0;  // white
+            if (R == 255 && G != 255 && B != 255) { // red
+              grey = (type == 'bw') ? 0 : (510 + 62 - G - B) >> 6;
+            } else { // gray
+              grey = (type == 'bw') ? (255 + 31 - R) >> 5 : 0;
+            }
+            arr.push(grey);
+          }
+        }
+      }
+      return arr;
+    }
+
+    async function doMyLut() {
+      const O = 0b00000000;   // VSS
+      const B = 0b01000000;   // VSH1 for Black
+      const W = 0b10000000;   // VSL  for white
+      const R = 0b11000000;   // VSH2 for Red
+      const lut_gray8 = [
+        //  RP         A         B         C         D  SRAB  SRCD
+        0x00,     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // LUTC
+        0x01, R | 0x20, 0x00, 0x00, 0x00, 0x01, 0x00,       // LUTR
+        0x00,     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // LUTW
+        0x01, B | 0x03, 0x00, 0x00, 0x00, 0x01, 0x00,       // LUTB
+        0x01, B | 0x03, 0x00, 0x00, 0x00, 0x01, 0x00,       // LUTB
+      ];
+      await doCmd('lut', lut_gray8);
+    }
+
+    async function doFill(color) {
+        await doCmd('rst');
+        await sleep(2000);
+        await doCmd('fill', color);
+        await doCmd('dp', 'full');
+        await sleep(15*1000);
+    }
+
+    async function doSnvRead(type) {
+      var chr = await epdService.getCharacteristic(0xfffe);
+        if (type == 'cfg') {
+          await doCmd('snv_read', 0x01);
+          await doCmd('buf_get', 0x00);
+          var a = await chr.readValue();
+          console.log(a);
+        }
+    }
+
+    async function doSnvWrite() {
+      //var chr = await epdService.getCharacteristic(0xfffe);
+      await doCmd('buf_put', 0x00);
+      await doCmd('snv_write', 0x80);
+    }
+
+    async function doSnvCfg() {
+      var data = await doCmdRead(0x80, 32);
+      // data to hex string in '0x02x' format, should a zero in front of single digit.
+      var out = data.map(x => (x < 16 ? '0' : '') + x.toString(16)).join(' ');
+      console.log(out);
+    }
+    
+    async function doLutWrite() {
+      var lutId = document.getElementById('lutId').value;
+      lutId = parseInt(lutId);
+      var lut = eval(document.getElementById('lut').value);
+      info(lutId);
+      info(lut);
+
+      await doCmd('buf_put', [0, ...lut]);
+      await doCmd('snv_write', 0x80+lutId);
+    }
+
+    async function doLutRead() {
+      var lutId = document.getElementById('lutId').value;
+      lutId = parseInt(lutId);
+      try {
+        var data = await doCmdRead(0x80+lutId, 35);
+      } catch (e) {
+        info(e);
+        document.getElementById('lut').value = '[]';
+        return;
+      }
+      console.log(data);
+
+      var out = '[\n';
+      // split data to every 7 bytes a group
+      for (var i = 0; i < data.length; i += 7) {
+        var d = data.slice(i, i + 7);
+        out += d.map(x => '0x' + x.toString(16)).join(', ');
+        out += ',\n';
+      }
+      out += ']';
+      document.getElementById('lut').value = out;
+    }
+
+  </script>
+  <script>
+		async function update_image() {
+			const image_file = document.getElementById('image_file');
+			if (image_file.files.length > 0) {
+				const file = image_file.files[0];
+				const canvas = document.getElementById("canvas");
+				const ctx = canvas.getContext("2d");
+				const image = new Image();
+				image.src = URL.createObjectURL(file);
+
+				image.onload = function (event) {
+					URL.revokeObjectURL(this.src);
+
+					// 获取当前屏幕尺寸
+					const size = document.getElementById('screensize').value;
+					const [screenWidth, screenHeight] = size.split('*').map(Number);
+
+					console.log(`=== update_image ===`);
+					console.log(`原始图片: ${image.width}x${image.height} (${image.width > image.height ? '横屏' : '竖屏'})`);
+					console.log(`目标画布: ${screenWidth}x${screenHeight} (${screenWidth > screenHeight ? '横屏' : '竖屏'})`);
+
+					// 设置画布尺寸为屏幕尺寸
+					canvas.width = screenWidth;
+					canvas.height = screenHeight;
+
+					// 清空画布（白色背景）
+					ctx.fillStyle = 'white';
+					ctx.fillRect(0, 0, screenWidth, screenHeight);
+
+					// 判断是否需要旋转
+					const imageIsLandscape = image.width > image.height;
+					const screenIsLandscape = screenWidth > screenHeight;
+					const needRotation = imageIsLandscape !== screenIsLandscape;
+
+					// 在update_image的旋转部分
+					if (needRotation && imageIsLandscape) {
+						console.log('横屏图片在竖屏上显示，旋转90度');
+
+						const sourceWidth = image.width;   // 2400
+						const sourceHeight = image.height; // 1080
+
+						// 关键修正：旋转90度后，原图的宽高互换
+						const scaleForHeight = screenHeight / sourceWidth;   // 880 / 2400 ≈ 0.3667
+						const scaleForWidth = screenWidth / sourceHeight;    // 528 / 1080 ≈ 0.4889
+
+						// 选择较小的缩放，确保完全显示
+						const scale = Math.min(scaleForHeight, scaleForWidth); // 0.3667
+
+						// 计算旋转前的绘制尺寸（在原始图片坐标系中）
+						const drawWidth = sourceWidth * scale;   // 2400 * 0.3667 ≈ 880
+						const drawHeight = sourceHeight * scale; // 1080 * 0.3667 ≈ 396
+
+						console.log(`缩放比例: ${scale.toFixed(4)}`);
+						console.log(`原始绘制尺寸: ${drawWidth.toFixed(1)}x${drawHeight.toFixed(1)}`);
+						console.log(`旋转后占用屏幕: ${drawHeight.toFixed(0)}x${drawWidth.toFixed(0)} (宽x高)`);
+
+						// 旋转绘制
+						ctx.save();
+
+						// 平移到旋转中心
+						ctx.translate(screenWidth / 2, screenHeight / 2);
+
+						// 旋转90度（顺时针）
+						ctx.rotate(90 * Math.PI / 180);
+
+						// 在旋转后的坐标系中绘制
+						const drawX = -drawWidth / 2;
+						const drawY = -drawHeight / 2;
+
+						ctx.drawImage(
+						  image,
+						  0, 0, sourceWidth, sourceHeight,
+						  drawX, drawY, drawWidth, drawHeight
+						);
+
+						ctx.restore();
+
+						console.log('旋转绘制完成');
+					} else if (needRotation && !imageIsLandscape) {
+						// 竖屏图片在横屏上显示
+						console.log('竖屏图片在横屏上显示，旋转-90度');
+
+						const sourceWidth = image.width;
+						const sourceHeight = image.height;
+						const rotatedWidth = sourceHeight;
+						const rotatedHeight = sourceWidth;
+
+						// 计算缩放
+						const scaleForWidth = screenWidth / rotatedWidth;
+						const resultingHeight1 = rotatedHeight * scaleForWidth;
+
+						const scaleForHeight = screenHeight / rotatedHeight;
+						const resultingWidth2 = rotatedWidth * scaleForHeight;
+
+						let scale;
+						if (resultingHeight1 <= screenHeight) {
+						  scale = scaleForWidth;
+						} else {
+						  scale = scaleForHeight;
+						}
+
+						const actualWidth = rotatedWidth * scale;
+						const actualHeight = rotatedHeight * scale;
+
+						// 旋转-90度绘制
+						ctx.save();
+						ctx.translate(screenWidth / 2, screenHeight / 2);
+						ctx.rotate(-90 * Math.PI / 180);
+
+						const drawX = -actualWidth / 2;
+						const drawY = -actualHeight / 2;
+
+						ctx.drawImage(
+						  image,
+						  0, 0, sourceWidth, sourceHeight,
+						  drawX, drawY, actualWidth, actualHeight
+						);
+
+						ctx.restore();
+
+					} else {
+						// 不需要旋转
+						console.log('方向匹配，直接缩放');
+
+						const scale = Math.min(
+						  screenWidth / image.width,
+						  screenHeight / image.height
+						);
+
+						const drawWidth = image.width * scale;
+						const drawHeight = image.height * scale;
+						const offsetX = (screenWidth - drawWidth) / 2;
+						const offsetY = (screenHeight - drawHeight) / 2;
+
+						console.log(`缩放: ${scale.toFixed(4)}, 尺寸: ${drawWidth.toFixed(0)}x${drawHeight.toFixed(0)}`);
+						console.log(`居中: x=${offsetX.toFixed(0)}, y=${offsetY.toFixed(0)}`);
+
+						ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+					}
+
+					console.log('预览完成，应用抖动算法...');
+					convert_dithering();
+				};
+
+				image.onerror = function (e) {
+					console.error('图片加载失败:', e);
+					alert('图片加载失败，请检查图片格式');
+				};
+			}
+		}
+		
+		function get_position(canvas, x, y) {
+			let rect = canvas.getBoundingClientRect()
+			return {
+				x: x - rect.left * (canvas.width / rect.width),
+				y: y - rect.top * (canvas.height / rect.height)
+			}
+		}
+
+		function clear_canvas() {
+			if (confirm('确认清除屏幕?')) {
+				const canvas = document.getElementById('canvas');
+				const ctx = canvas.getContext("2d");
+				ctx.fillStyle = 'white';
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+			}
+		}
+
+		function horizon_clip_canvas() {
+			const canvas = document.getElementById('canvas');
+			const ctx = canvas.getContext("2d");
+			const sourceData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+			var newData = ctx.createImageData(canvas.width, canvas.height);
+			for (var i = 0, h = sourceData.height; i < h; i++) {
+				for (j = 0, w = sourceData.width; j < w; j++) {
+					newData.data[i * w * 4 + j * 4 + 0] =
+						sourceData.data[i * w * 4 + (w - j) * 4 + 0];
+					newData.data[i * w * 4 + j * 4 + 1] =
+						sourceData.data[i * w * 4 + (w - j) * 4 + 1];
+					newData.data[i * w * 4 + j * 4 + 2] =
+						sourceData.data[i * w * 4 + (w - j) * 4 + 2];
+					newData.data[i * w * 4 + j * 4 + 3] =
+						sourceData.data[i * w * 4 + (w - j) * 4 + 3];
+				}
+			}
+			ctx.putImageData(newData, 0, 0);
+		}
+
+		function vertial_clip_canvas() {
+			const canvas = document.getElementById('canvas');
+			const ctx = canvas.getContext("2d");
+			const sourceData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+			var newData = ctx.createImageData(canvas.width, canvas.height);
+			for (var i = 0, h = sourceData.height; i < h; i++) {
+				for (var j = 0, w = sourceData.width; j < w; j++) {
+					newData.data[i * w * 4 + j * 4 + 0] =
+						sourceData.data[(h - i) * w * 4 + j * 4 + 0];
+					newData.data[i * w * 4 + j * 4 + 1] =
+						sourceData.data[(h - i) * w * 4 + j * 4 + 1];
+					newData.data[i * w * 4 + j * 4 + 2] =
+						sourceData.data[(h - i) * w * 4 + j * 4 + 2];
+					newData.data[i * w * 4 + j * 4 + 3] =
+						sourceData.data[(h - i) * w * 4 + j * 4 + 3];
+				}
+			}
+			ctx.putImageData(newData, 0, 0);
+		}
+
+		function convert_dithering() {
+			const canvas = document.getElementById('canvas');
+			const ctx = canvas.getContext("2d");
+			const mode = document.getElementById('dithering').value;
+			const thresholds = []
+			for (let i = 0; i < 3; i++) {
+				thresholds.push(parseInt(document.getElementById(`threshold${i}`).value))
+			}
+			console.log(thresholds)
+			if (mode.startsWith('bwr')) {
+				ditheringCanvasByPalette(canvas, bwrPalette, mode);
+			} else if (mode.startsWith('somegray')) {
+				dithering(ctx, canvas.width, canvas.height, thresholds, mode);
+			} else {
+				dithering(ctx, canvas.width, canvas.height, thresholds, mode);
+			}
+		}
+  </script>
+
+  <div>
+    <label> Choose </label>
+    <button id="btnConnect" type="button" onclick="doConnect()">Connect</button>
+  </div>
+  <div id="etagFn" style="_visibility_:hidden;">
+    <div>
+    <button type="button" onclick="doCmd('mode', 'clock')">时钟模式</button>
+     <button type="button" onclick="doCmd('mode', 'calendar')">日历模式</button>
+    <button id="btnReadEtag" type="button" onclick="doReadEtag()">ReadEtag</button>
+    <button id="btnSetTime" type="button" onclick="doSetTime()">SetTime</button>
+    <button id="btnRtcCollab" type="button" onclick="doRtcCollab()">RtcCollab</button>
+    <button type="button" onclick="doCmd('save_cfg')">保存设置</button>
+    </div>
+    
+    <div>
+    <button type="button" onclick="doCmd('mode', 'image')">图片模式</button>
+    <button type="button" onclick="doCmd('clr')">清屏</button>
+    <button type="button" onclick="doFill('black')">全黑</button>
+    <button type="button" onclick="doFill('red')">全红</button>
+    </div>
+    <div id="canvas-box">
+    <input type="file" id="image_file" onchange="update_image()" accept=".png,.jpg,.bmp,.webp,.gif">
+      <br>
+扫描类型：
+<input type="radio" name="byteConvertType" id="typeSsd" value="ssd" checked>
+<label for="typeSsd">SSD</label>
+<input type="radio" name="byteConvertType" id="typeUc" value="uc">
+<label for="typeUc">UC</label>
+<br>
+
+	抖动算法：
+  <!-- 新增：字节转换类型单选框 -->
+<br>
+
+
+	<select id="dithering" title="抖动算法">
+		<optgroup label="黑白">
+			<option value="none">二值化</option>
+			<option value="bayer">bayer</option>
+			<option value="floydsteinberg">floydsteinberg</option>
+			<option value="Atkinson">Atkinson</option>
+		</optgroup>
+		<optgroup label="黑白红多色">
+			<option value="bwr_floydsteinberg">黑白红floydsteinberg</option>
+			<option value="bwr_Atkinson">黑白红Atkinson</option>
+		</optgroup>
+		<optgroup label="灰色">
+			<option value="somegray">灰</option>
+		</optgroup>
+	</select>
+	屏幕尺寸：
+	<select id="screensize" title="屏幕尺寸">
+   	<option value="212*104">2.13(212*104)</option> 
+		<option value="250*122">2.13(250*122)</option>
+   	<option value="296*128">2.9(296*128)</option> 
+     	<option value="128*296">2.9(128*296)</option>  
+		<option value="296*152">2.66(296*152)</option>
+ 	   <option value="300*400">4.2(300*400)</option>
+  	<option value="480*800">7.5(480*800)</option>      
+	<option value="528*880">7.5(528*880)</option>
+	</select>
+	<br>
+	阈值:
+	<input type="number" max="255" min="0" value="20" id="threshold0">
+	<input type="number" max="255" min="0" value="120" id="threshold1">
+	<input type="number" max="255" min="0" value="220" id="threshold2">
+	<button onclick="update_image()">重新加载</button>
+	<br>
+	<div id="tool-box">
+		模式：
+		<select id="canvas-mode">
+			<option value="paint">画笔</option>
+			<option value="font" title="输入完成后 点击：保存文本框">输入文字</option>
+		</select>
+		画笔/文字大小：
+		<input type="number" max="13" min="1" step="1" value="3" id="paint-size">
+		画笔颜色：
+		<select id="paint-color">
+			<option value="red">红色</option>
+			<option value="white">白色</option>
+			<option value="black">黑色</option>
+		</select>
+
+		<select id="font" title="字体" style="display: none;">
+			<option value="微软雅黑">微软雅黑</option>
+			<option value="黑体">黑体</option>
+			<option value="仿宋">仿宋</option>
+			<option value="宋体">宋体</option>
+			<option value="楷体_GB2312">楷体_GB2312</option>
+			<option value="华文行楷">华文行楷</option>
+		</select>
+		<button id="update-text" style="display: none">保存文本框</button>
+		<button onclick="clear_canvas()">清屏</button>
+		<button onclick="horizon_clip_canvas()">水平翻转</button>
+		<button onclick="vertial_clip_canvas()">垂直翻转</button>
+		<!-- 添加旋转按钮 -->
+		<button onclick="rotateCanvas(90)">顺时针旋转90°</button>
+		<button onclick="rotateCanvas(-90)">逆时针旋转90°</button>
+	</div>
+	<input id="edit-font" style="max-width: 250; position: absolute; border: black solid 1px;background-color: rgba(0,0,0,0);display: none;overflow: auto" />
+      <canvas id="canvas" width="250" height="122" style="border: black solid 1px;"></canvas>
+      <br>
+      <button onclick="doUploadImage('full')">确认上传</button>
+      <br>
+    </div>
+  </div>
+
+  <div id="log">
+    CC2640R2-ETAG Webtool. <br>
+  </div>
+  <script>etagFnEnable(false);</script>
+  <script>
+		document.body.onload = () => {
+			const canvas = document.getElementById('canvas');
+			const ctx = canvas.getContext("2d");
+			ctx.fillStyle = 'white';
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+			let is_allow_drawing = false;
+			let is_allow_move_editor = false;
+			const image_mode = document.getElementById('canvas-mode');
+			const paint_size = document.getElementById('paint-size');
+			const paint_color = document.getElementById('paint-color');
+			const editor = document.getElementById('edit-font');
+			const font = document.getElementById('font');
+			document.getElementById('dithering').value = 'bwr_Atkinson';
+			image_mode.value = 'paint';
+			paint_color.value = 'black';
+			font.value = '黑体';
+
+			editor.onmousemove = function (e) {
+				editor.style.fontSize = `${paint_size.value * 10}px`;
+				editor.style.color = paint_color.value;
+				editor.style.fontFamily = font.value;
+				editor.style.fontWeight = 'bold';
+
+				if (is_allow_move_editor) {
+					const { x, y } = get_position(canvas, e.clientX, e.clientY);
+					if (x < 0 || y < 0 || x > canvas.width || y > canvas.height) {
+						return;
+					}
+
+					editor.style.left = `${e.clientX - 20}px`;
+					editor.style.top = `${e.clientY - 20}px`;
+				}
+			}
+
+			editor.onmousedown = function (e) {
+				is_allow_move_editor = true;
+			}
+
+			editor.onmouseup = function (e) {
+				is_allow_move_editor = false;
+			}
+
+			document.getElementById('update-text').onclick = function () {
+				if (!editor.value.length) {
+					alert('请先输入文字');
+					return;
+				}
+				editor.style.display = 'none';
+				ctx.beginPath();
+				ctx.font = `bold ${paint_size.value * 10}px ${font.value}`;
+				ctx.fillStyle = paint_color.value;
+				const { x, y } = get_position(canvas, parseInt(editor.style.left), parseInt(editor.style.top) + paint_size.value * 10);
+
+				ctx.fillText(editor.value, x, y);
+			}
+
+			document.getElementById('screensize').onchange = function () {
+				const size = document.getElementById('screensize').value;
+				console.log(`切换屏幕尺寸: ${size}`);
+				const [width, height] = size.split('*').map(Number);
+
+				const canvas = document.getElementById('canvas');
+				canvas.width = width;
+				canvas.height = height;
+
+				// 清空画布
+				const ctx = canvas.getContext("2d");
+				ctx.fillStyle = 'white';
+				ctx.fillRect(0, 0, width, height);
+
+				// 如果有图像文件，重新加载
+				const image_file = document.getElementById('image_file');
+				if (image_file.files.length > 0) {
+					console.log('重新加载图像');
+					update_image();
+				}
+			}
+
+			image_mode.onchange = function (e) {
+				if (image_mode.value === 'font') {
+					document.getElementById('update-text').style.display = 'inline-block';
+					document.getElementById('font').style.display = 'inline-block';
+
+					editor.style.display = 'block';
+					editor.style.left = `${e.clientX}px`;
+					editor.style.top = `${e.clientY}px`;
+					return;
+				}
+				document.getElementById('update-text').style.display = 'none';
+				document.getElementById('font').style.display = 'none';
+				editor.style.display = 'none';
+			}
+
+			paint_size.onchange = function () {
+				if (image_mode.value === 'font') {
+					editor.style.fontSize = `${paint_size.value * 10}px`;
+				}
+			}
+
+			paint_color.onchange = function () {
+				if (image_mode.value === 'font') {
+					editor.style.color = paint_color.value;
+				}
+			}
+
+			font.onchange = function () {
+				if (image_mode.value === 'font') {
+					editor.style.fontFamily = font.value;
+				}
+			}
+
+			canvas.onmousedown = function (e) {
+				let ele = get_position(canvas, e.clientX, e.clientY)
+				let { x, y } = ele
+
+				switch (image_mode.value) {
+					case 'paint':
+						is_allow_drawing = true;
+						ctx.beginPath();
+						ctx.moveTo(x, y);
+						break;
+					case 'font':
+						editor.style.display = 'block';
+						editor.style.left = `${e.clientX}px`;
+						editor.style.top = `${e.clientY}px`;
+						editor.style.fontSize = `${paint_size.value * 10}px`;
+						editor.style.color = paint_color.value;
+						editor.style.fontFamily = font.value;
+						editor.style.fontWeight = 'bold';
+						break;
+					default:
+						break;
+				}
+			};
+
+			canvas.onmousemove = (e) => {
+				let ele = get_position(canvas, e.clientX, e.clientY)
+				let { x, y } = ele;
+				switch (image_mode.value) {
+					case 'paint':
+						if (is_allow_drawing) {
+							ctx.lineWidth = paint_size.value;
+							ctx.strokeStyle = paint_color.value;
+							ctx.lineTo(x, y);
+							ctx.stroke();
+						}
+						break;
+					case 'font':
+						break;
+					default:
+						break;
+				}
+			}
+
+			canvas.onmouseup = function () {
+				switch (image_mode.value) {
+					case 'paint':
+						is_allow_drawing = false;
+						break;
+					case 'font':
+						editor.focus();
+						is_allow_move_editor = false;
+						break;
+					default:
+						break;
+				}
+			}
+
+			canvas.onmouseleave = function () {
+				if (image_mode.value === 'paint') {
+					is_allow_drawing = false;
+				}
+			}
+		}
+	</script>
+</body>
+</html>
